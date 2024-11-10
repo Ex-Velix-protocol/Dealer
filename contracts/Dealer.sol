@@ -168,7 +168,7 @@ contract Dealer is OwnableUpgradeable {
     function relock() external payable returns (uint256 totalProcessed) {
         require(activeSequencerIds.length > 0, "Dealer: no active sequencer");
 
-        uint maxLock = lockingInfo.maxLock();
+        uint maxLock = ILockingInfo(lockingInfo).maxLock();
         uint256 undistributedAmount = metis.balanceOf(address(this));
         uint256 totalRewards = 0;
 
@@ -242,22 +242,13 @@ contract Dealer is OwnableUpgradeable {
     }
 
     function depositToRedemptionQueue(uint256 amount) external payable onlyOwner {
-        address bridge = lockingInfo.bridge();
-        IERC20(lockingInfo.l1Token()).approve(bridge, amount);
-        IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, lockingInfo.l1Token(), lockingInfo.l2Token(), redemptionQueue, amount, l2Gas, "");
+        address bridge = ILockingInfo(lockingInfo).bridge();
+        IERC20(ILockingInfo(lockingInfo).l1Token()).approve(bridge, amount);
+        IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, ILockingInfo(lockingInfo).l1Token(), ILockingInfo(lockingInfo).l2Token(), redemptionQueue, amount, l2Gas, "");
         emit DepositToRedemptionQueue(amount);
     }
-
 
     function setRedemptionQueue(address _redemptionQueue) public onlyOwner {
         redemptionQueue = _redemptionQueue;
     }
-    // function withdrawMetisFromDealer() public onlyOwner(){
-    //     uint256 contractBalance = metis.balanceOf(address(this));
-
-    //     require(contractBalance > 0, "No tokens to withdraw");
-
-    //     bool success = metis.transfer(msg.sender, contractBalance);
-    //     require(success, "Token transfer failed");
-    // }
 }
