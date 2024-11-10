@@ -8,7 +8,7 @@ import "../interface/ICrossDomainEnabled.sol";
 import "../interface/ILockingPool.sol";
 import "../interface/IVeMetisMinter.sol";
 import "../interface/ICrossDomainMessenger.sol";
-import "./SequencerAgent.sol";
+import "../interface/IL1ERC20Bridge.sol";
 
 
 /// @title Dealer
@@ -86,6 +86,14 @@ contract Dealer is OwnableUpgradeable {
     /// @notice withdraw rewards
     bool public withdrawRewards;
 
+    uint256 public sequencerId;
+    address public sequencerSigner;
+    bool public active;
+    address public redemptionQueue;
+    /// @notice Deposits Metis tokens into the redemption queue.
+    /// @param amount The amount of Metis tokens that have been deposited.
+    event DepositToRedemptionQueue(uint256 amount);
+
     /// @notice Initializes the contract.
     function initialize( 
         address _metis, 
@@ -109,55 +117,49 @@ contract Dealer is OwnableUpgradeable {
 
     }
 
-    /// @notice Returns the number of active sequencers.
-    /// @return The number of active sequencers.
-    function activeSequencerCount() external view returns (uint32) {
-        return uint32(activeSequencerIds.length);
-    }
-
-    /// @notice set withdraw rewards
-    /// @param _withdrawRewards The new value of the withdrawRewards flag.
-    function setWithdrawRewards(bool _withdrawRewards) external onlyOwner {
-        bool _old = withdrawRewards;
-        withdrawRewards = _withdrawRewards;
-        emit WithdrawRewardsSet(_old, _withdrawRewards);
-    }
-
-    /// @notice Adds a new sequencer agent.
-    /// @return The index of the new sequencer agent.
-    function addAgent() external onlyOwner returns (uint32) {
-        bytes memory data = abi.encodeWithSelector(SequencerAgent.initialize.selector, address(this), lockingPool, lockingInfo, address(metis));
-        address clone = address(new BeaconProxy(address(this), data));
-        uint32 index = sequencerAgentCount;
-        sequencerAgents[index] = clone;
-        emit SequencerAgentAdded(index, clone);
-        sequencerAgentCount++;
-        return index;
-    }
-
     /// @notice Locks Metis tokens for a new sequencer.
-    /// @param agentId The index of the sequencer agent.
-    /// @param sequencerSigner The address of the sequencer signer.
-    /// @param amount The amount of Metis tokens to lock.
-    /// @param signerPubKey The public key of the sequencer signer.
-    function lockFor(uint32 agentId, address sequencerSigner, uint256 amount, bytes memory signerPubKey) external onlyOwner {
-        address agent = sequencerAgents[agentId];
-        IERC20(metis).transferFrom(msg.sender, agent, amount);
-        SequencerAgent(agent).lock(sequencerSigner, l2Minter, amount, signerPubKey);
-        _setActive(agentId, true);
+    /// @param _sequencerSigner The address of the sequencer signer.
+    /// @param _amount The amount of Metis tokens to lock.
+    /// @param _signerPubKey The public key of the sequencer signer.
+    function lockFor(
+        address _sequencerSigner,
+        uint256 _amount,
+        bytes memory _signerPubKey
+    ) external onlyOwner {
+        // Check if the Dealer contract has sufficient Metis balance
+        uint256 dealerBalance = metis.balanceOf(address(this));
+        require(dealerBalance >= _amount, "Dealer: Insufficient Metis balance");
+
+        sequencerSigner = _sequencerSigner;
+
+        // Approve the LockingInfo contract to spend the specified amount of tokens
+        require(
+            metis.approve(address(lockingInfo), type(uint256).max),
+            "Dealer: Approval to LockingInfo failed"
+        );
+
+        // Attempt to lock the tokens by calling LockingPool's lockFor function
+        lockingPool.lockWithRewardRecipient(sequencerSigner,l2Minter, _amount, _signerPubKey);
+
+        // Retrieve and store the sequencer ID for tracking purposes
+        sequencerId = lockingPool.seqSigners(sequencerSigner);
+        active = true;
     }
+
 
     /// @notice Unlock Metis tokens and terminate the sequencer.
-    /// @param agentId The index of the sequencer agent.
-    function unlock(uint32 agentId) external payable onlyOwner {
-        SequencerAgent(sequencerAgents[agentId]).unlock(l2Gas);
-        _removeFromActiveList(agentId);
+    function unlock() external payable onlyOwner {
+        lockingPool.unlock{value: msg.value}(sequencerId, l2Gas);
+        active = false;
     }
 
     /// @notice The `unlockClaim` function allows a sequencer to claim their Metis tokens after the unlocking waiting period has elapsed.
-    /// @param agentId The index of the sequencer agent.
-    function unlockClaim(uint32 agentId) external payable onlyOwner {
-        SequencerAgent(sequencerAgents[agentId]).unlockClaim(l2Gas);
+    function unlockClaim() external payable onlyOwner {
+        lockingPool.unlockClaim{value: msg.value}(sequencerId, l2Gas);
+    }
+
+    function sequencerData() public view returns (ILockingPool.SequencerData memory) {
+        return lockingPool.sequencers(sequencerId);
     }
 
     /// @notice Facilitates the process of augmenting the locked Metis tokens and rewards for all currently active sequencers.
@@ -170,10 +172,7 @@ contract Dealer is OwnableUpgradeable {
         uint256 undistributedAmount = metis.balanceOf(address(this));
         uint256 totalRewards = 0;
 
-        for (uint32 i = 0; i < activeSequencerIds.length; i++) {
-            uint32 agentId = activeSequencerIds[i];
-            SequencerAgent agent = SequencerAgent(sequencerAgents[agentId]);
-            ILockingPool.SequencerData memory seq = agent.sequencerData();
+            ILockingPool.SequencerData memory seq = sequencerData();
             (uint256 reward, uint256 locked) = (seq.reward, seq.amount);
             totalRewards += reward;
 
@@ -188,43 +187,26 @@ contract Dealer is OwnableUpgradeable {
 
             // If there is not any lock amount or reward, the process should be skipped.
             uint256 toBeProcessed = lockAmount + reward;
-            if (toBeProcessed == 0) {
-                continue;
-            }
-
             totalProcessed += toBeProcessed;
 
             // The rewards are withdrawn if the `withdrawRewards` flag is set to true, or if the locked amount plus the amount to be processed exceeds the maximum lock amount.
             bool _withdrawRewards = withdrawRewards || locked + toBeProcessed > maxLock;
             if (_withdrawRewards && reward > 0) {
-                agent.withdrawRewards(l2Gas);
+                lockingPool.withdrawRewards(sequencerId, l2Gas);
             }
 
             // If the lock amount is not zero, or if we decided to convert the rewards to lock amount, the `relock` function is called.
             if (!_withdrawRewards || lockAmount > 0) {
-                IERC20(metis).transfer(address(agent), lockAmount);
-                agent.relock(lockAmount);
-                emit SequencerRelocked(agentId, lockAmount, reward);
+                lockingPool.relock(sequencerId, lockAmount, true);
+                emit SequencerRelocked(0, lockAmount, reward);
             }
-        }
+        
 
         // In the event of any rewards, the MetisMinter contract on Layer 2 is invoked to mint eMetis tokens. These tokens are then distributed as rewards to seMetis holders.
         if (totalRewards > 0) {
             _mintL2EMetis(totalRewards);
             sumRewards += totalRewards;
         }
-    }
-
-    /// @notice Sets the active status of a sequencer agent.
-    function setActive(uint32 agentId, bool active) external onlyOwner {
-        _setActive(agentId, active);
-    }
-
-    /// @notice Sets the sequencer agent template.
-    /// @param _sequencerAgentTemplate The address of the new sequencer agent template.
-    function setSequencerAgentTemplate(address _sequencerAgentTemplate) external onlyOwner {
-        require(_sequencerAgentTemplate != address(0), "Dealer: zero address");
-        sequencerAgentTemplate = _sequencerAgentTemplate;
     }
 
     /// @notice Sets the L2 gas limit.
@@ -238,32 +220,7 @@ contract Dealer is OwnableUpgradeable {
 
     /// @notice Returns the total amount of Metis tokens that have been locked for all sequencers.
     function totalLocked() external view returns (uint256) {
-        uint256 total = 0;
-        for (uint32 i = 0; i < activeSequencerIds.length; i++) {
-            uint32 agentId = activeSequencerIds[i];
-            SequencerAgent agent = SequencerAgent(sequencerAgents[agentId]);
-            uint256 locked = agent.sequencerData().amount;
-            total += locked;
-        }
-        return total;
-    }
-
-    /// @notice Use Dealer as a beacon of BeaconProxy for SequencerAgent
-    /// @return The implementation address
-    function implementation() external view returns (address) {
-        return sequencerAgentTemplate;
-    }
-
-    /// @notice Sets the active status of a sequencer agent.
-    function _setActive(uint32 agentId, bool active) internal {
-        if (active) {
-            for (uint32 i = 0; i < activeSequencerIds.length; i++) {
-                require(activeSequencerIds[i] != agentId, "Dealer: already active");
-            }
-            activeSequencerIds.push(agentId);
-        } else {
-            _removeFromActiveList(agentId);
-        }
+        return sequencerData().amount;
     }
 
     /// @notice mint veMetis on Layer 2
@@ -274,25 +231,33 @@ contract Dealer is OwnableUpgradeable {
         emit L2MetisMinted(amount);
     }
 
-    /// @notice Removes a sequencer agent from the active list.
-    /// @param agentId The index of the sequencer agent.
-    /// @dev The sequencer agent is removed from the active list by swapping it with the last element in the list, and then popping the last element.
-    function _removeFromActiveList(uint32 agentId) internal returns (uint32 index) {
-        index = _findFromActiveList(agentId);
-        require(index < type(uint32).max, "Dealer: not active");
-        activeSequencerIds[index] = activeSequencerIds[activeSequencerIds.length - 1];
-        activeSequencerIds.pop();
+    function setL2Minter(address _l2GasAddress) public{
+        l2Minter = _l2GasAddress;
     }
 
-    /// @notice Finds the index of a sequencer agent in the active list.
-    /// @param agentId The index of the sequencer agent.
-    /// @return The index of the sequencer agent in the active list.
-    function _findFromActiveList(uint32 agentId) internal view returns (uint32) {
-        for (uint32 index = 0; index < activeSequencerIds.length; index++) {
-            if (activeSequencerIds[index] == agentId) {
-                return index;
-            }
-        }
-        return type(uint32).max;
+    /// @notice withdraw locked Metis tokens
+    /// @param amount The amount of Metis tokens to withdraw.
+    function withdrawLocking(uint256 amount) public onlyOwner {
+        lockingPool.withdraw(sequencerId, amount);
     }
+
+    function depositToRedemptionQueue(uint256 amount) external payable onlyOwner {
+        address bridge = lockingInfo.bridge();
+        IERC20(lockingInfo.l1Token()).approve(bridge, amount);
+        IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, lockingInfo.l1Token(), lockingInfo.l2Token(), redemptionQueue, amount, l2Gas, "");
+        emit DepositToRedemptionQueue(amount);
+    }
+
+
+    function setRedemptionQueue(address _redemptionQueue) public onlyOwner {
+        redemptionQueue = _redemptionQueue;
+    }
+    // function withdrawMetisFromDealer() public onlyOwner(){
+    //     uint256 contractBalance = metis.balanceOf(address(this));
+
+    //     require(contractBalance > 0, "No tokens to withdraw");
+
+    //     bool success = metis.transfer(msg.sender, contractBalance);
+    //     require(success, "Token transfer failed");
+    // }
 }

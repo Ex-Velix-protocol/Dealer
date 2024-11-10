@@ -31,12 +31,18 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
   console.log("========Deploying Dealer========");
   console.log("Contract address: ", dealer.address);
   log("Verifying...");
-  await verify(dealer.address, arguments);
+    await run("verify:verify", {
+      address: dealer.address,
+      // address: "0xe61285459ec4fba022f70247c7fb0a28c84efd4d",
+      constructorArguments: arguments,
+    });
 };
 
 module.exports.tags = ["all", "dealer"];
 
-// already verified: Dealer (0x972C84B2d8a4678e4ee08DE19a027279847C6451), skipping.
-// already verified: Dealer_Implementation (0xadCdDb3ee010eD3Aa5714ab1f05F37B12462a894), skipping.
+// verifying Dealer_Implementation (0x3fe40C3903831Ca42A81cCCde8868da1e5823bef) ...
+// waiting for result...
+//  => contract Dealer_Implementation is now verified
 // already verified: Dealer_Proxy (0x972C84B2d8a4678e4ee08DE19a027279847C6451), skipping.
 // already verified: DefaultProxyAdmin (0xE1E77D21fD320FEA5519B0EFb1F37d24237A943a), skipping.
+// already verified: SequencerAgent (0xc7961c5856c77431726698b266b7e4241451f07A), skipping.

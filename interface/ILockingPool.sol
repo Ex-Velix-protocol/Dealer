@@ -53,4 +53,5 @@ interface ILockingPool is ISequencerInfo {
      * @param _n new min value
      */
     event SetSignerUpdateThrottle(uint256 _n);
+    function withdraw(uint256 _seqId, uint256 _amount) external;
 }
