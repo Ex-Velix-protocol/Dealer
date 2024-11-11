@@ -90,9 +90,10 @@ contract Dealer is OwnableUpgradeable {
     address public sequencerSigner;
     bool public active;
     address public redemptionQueue;
-    /// @notice Deposits Metis tokens into the redemption queue.
+    /// @notice Withdaws Metis token and deposits Metis tokens into the redemption queue.
+    /// @param recipient The recipient of the  Metis token on  L2 (redemptionQueue).
     /// @param amount The amount of Metis tokens that have been deposited.
-    event DepositToRedemptionQueue(uint256 amount);
+    event StakingAmountWithdrawn(address indexed recipient, uint256 amount);
 
     /// @notice Initializes the contract.
     function initialize( 
@@ -171,7 +172,7 @@ contract Dealer is OwnableUpgradeable {
         uint maxLock = ILockingInfo(lockingInfo).maxLock();
         uint256 undistributedAmount = metis.balanceOf(address(this));
         uint256 totalRewards = 0;
-
+        for (uint32 i = 0; i < 1; i++) {
             ILockingPool.SequencerData memory seq = sequencerData();
             (uint256 reward, uint256 locked) = (seq.reward, seq.amount);
             totalRewards += reward;
@@ -184,13 +185,17 @@ contract Dealer is OwnableUpgradeable {
 
             // The undistributed amount should be reduced by the amount of Metis tokens that have been locked.
             undistributedAmount -= lockAmount;
-
-            // If there is not any lock amount or reward, the process should be skipped.
+            
+             // If there is not any lock amount or reward, the process should be skipped.
             uint256 toBeProcessed = lockAmount + reward;
+            if (toBeProcessed == 0) {
+                continue;
+            }
+
             totalProcessed += toBeProcessed;
 
-            // The rewards are withdrawn if the `withdrawRewards` flag is set to true, or if the locked amount plus the amount to be processed exceeds the maximum lock amount.
-            bool _withdrawRewards = withdrawRewards || locked + toBeProcessed > maxLock;
+            // The rewards are withdrawn  if the locked amount plus the amount to be processed exceeds the maximum lock amount.
+            bool _withdrawRewards = locked + toBeProcessed > maxLock;
             if (_withdrawRewards && reward > 0) {
                 lockingPool.withdrawRewards(sequencerId, l2Gas);
             }
@@ -200,7 +205,7 @@ contract Dealer is OwnableUpgradeable {
                 lockingPool.relock(sequencerId, lockAmount, true);
                 emit SequencerRelocked(0, lockAmount, reward);
             }
-        
+        }   
 
         // In the event of any rewards, the MetisMinter contract on Layer 2 is invoked to mint eMetis tokens. These tokens are then distributed as rewards to seMetis holders.
         if (totalRewards > 0) {
@@ -231,21 +236,20 @@ contract Dealer is OwnableUpgradeable {
         emit L2MetisMinted(amount);
     }
 
-    function setL2Minter(address _l2GasAddress) public{
-        l2Minter = _l2GasAddress;
-    }
-
-    /// @notice withdraw locked Metis tokens
+    /// @notice withdraw locked Metis tokens and deposits them into the redemptionQueue.
     /// @param amount The amount of Metis tokens to withdraw.
-    function withdrawLocking(uint256 amount) public onlyOwner {
+    function withdrawStakingAmount(uint256 amount) public payable onlyOwner {
         lockingPool.withdraw(sequencerId, amount);
-    }
 
-    function depositToRedemptionQueue(uint256 amount) external payable onlyOwner {
         address bridge = ILockingInfo(lockingInfo).bridge();
         IERC20(ILockingInfo(lockingInfo).l1Token()).approve(bridge, amount);
         IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, ILockingInfo(lockingInfo).l1Token(), ILockingInfo(lockingInfo).l2Token(), redemptionQueue, amount, l2Gas, "");
-        emit DepositToRedemptionQueue(amount);
+        emit StakingAmountWithdrawn(redemptionQueue,amount);
+    }
+
+    // Setters
+    function setL2Minter(address _l2MinterAddress) public onlyOwner{
+        l2Minter = _l2MinterAddress;
     }
 
     function setRedemptionQueue(address _redemptionQueue) public onlyOwner {
