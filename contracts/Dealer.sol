@@ -255,4 +255,9 @@ contract Dealer is OwnableUpgradeable {
     function setRedemptionQueue(address _redemptionQueue) public onlyOwner {
         redemptionQueue = _redemptionQueue;
     }
+
+     function setL2RewardDispatcher(address _l2RewardDispatcher) public onlyOwner {
+        l2RewardDispatcher = _l2RewardDispatcher;
+    }
+    
 }

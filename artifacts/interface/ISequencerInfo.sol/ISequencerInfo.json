@@ -1,0 +1,132 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "ISequencerInfo",
+  "sourceName": "interface/ISequencerInfo.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "NoRewardRecipient",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NoSuchSeq",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotSeqOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotSeqSigner",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotWhitelisted",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NullAddress",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "OwnedSequencer",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "SeqNotActive",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "SignerExisted",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "_seqId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "_owner",
+          "type": "address"
+        }
+      ],
+      "name": "SequencerOwnerChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "_seqId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "_recipient",
+          "type": "address"
+        }
+      ],
+      "name": "SequencerRewardRecipientChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "_user",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "_yes",
+          "type": "bool"
+        }
+      ],
+      "name": "SetWhitelist",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        }
+      ],
+      "name": "seqOwners",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "seqId",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
