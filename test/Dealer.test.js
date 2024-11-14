@@ -130,12 +130,9 @@ describe("Dealer Contract Tests", function () {
   describe("relock", function () {
     it("Should successfully relock Metis tokens for active sequencers", async function () {
       const dealerUser = DealerFactory.connect(deployer);
-      console.log("Dealer user: ", dealerUser);
       expect(await dealerUser.active()).to.equal(true);
       // Act
-      const depositTx = await dealerUser.relock();
-      // await depositTx.wait(1);
-      console.log("Deposit tx: ",await depositTx);
+      await dealerUser.relock();
     });
   });
 
