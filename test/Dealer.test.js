@@ -1,126 +1,195 @@
-const {
-  time,
-  loadFixture,
-} = require("@nomicfoundation/hardhat-toolbox/network-helpers");
-const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 const { expect } = require("chai");
+const { ethers } = require("hardhat");
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("Dealer Contract Tests", function () {
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+  let dealer;
+  let owner;
+  let DealerFactory;
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
+  const dealerAddress = "0x972C84B2d8a4678e4ee08DE19a027279847C6451";
+  const metisAddress = "0x7f49160EB9BB068101d445fe77E17ecDb37D0B47";
+  const lockingPoolAddress = "0x7591940125cC0344a65D60319d1ADcD463B2D4c3";
+  const l1BridgeAddress = "0x9848dE505e6Aa301cEecfCf23A0a150140fc996e";
+  const l2ChainId = 59902;
+  const l2Gas = 1000000;
+  const l2MinterAddress = "0x82c6D49F563D87F8D95bDd7350174d0314401B18";
+  const l2RewardDispatcherAddress =
+    "0xC4708854dB13492C9411C17B97DC41bB9370eCD5";
+  const sequencerSignerAddress = "0xFA35530a8B62bab8Eb0E92B5E7c4eD0F2Cea7f7F";
+  const amountToLock = ethers.parseEther("20000"); // 20000 METIS
+  const signerPubKey =
+    "0xf1e24546ea042780a62e262098153dc866095de200eb933f6bb53eb0c0cab3f5417798989deb7c552355835b9fcb00fe2ebcc777e3b427cf0355b75f67eeb247";
 
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+  beforeEach(async function () {
+    // Initialization logic
+    [owner] = await ethers.getSigners();
+    DealerFactory = await ethers.getContractFactory("Dealer");
+    try {
+      dealer = DealerFactory.attach(dealerAddress);
+    } catch (error) {
+      console.error("Error attaching contracts:", error);
+    }
+  });
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
+  describe("lockFor", function () {
+    it("Should fail if Dealer has insufficient Metis balance", async function () {
+      await expect(
+        dealer
+          .connect(owner)
+          .lockFor(sequencerSignerAddress, amountToLock, signerPubKey)
+      ).to.be.revertedWith("Dealer: Insufficient Metis balance");
     });
 
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
+    it("Should successfully lock Metis tokens for a new sequencer", async function () {
+      // Act
+      await expect(
+        dealer
+          .connect(owner)
+          .lockFor(sequencerSignerAddress, amountToLock, signerPubKey)
+      )
+        .to.emit(dealer, "SequencerInitialBalanceLocked")
+        .withArgs(sequencerSignerAddress, amountToLock, true);
 
-      expect(await lock.owner()).to.equal(owner.address);
+      // Assert
+      expect(await dealer.sequencerSigner()).to.equal(sequencerSignerAddress);
+      expect(await dealer.active()).to.equal(true);
+    });
+  });
+
+    describe("unlock", function () {
+    it("Should successfully unlock Metis tokens and terminate the sequencer", async function () {
+      // Arrange: Lock tokens first
+      await dealer.connect(owner).lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
+      
+      // Act
+      await expect(dealer.connect(owner).unlock())
+        .to.emit(dealer, "SequencerTerminated")
+        .withArgs(sequencerSignerAddress);
+      
+      // Assert
+      expect(await dealer.active()).to.equal(false);
     });
 
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
+    it("Should fail to unlock if not the owner", async function () {
+      await expect(
+        dealer.connect(user).unlock()
+      ).to.be.revertedWith("Ownable: caller is not the owner");
+    });
+    });
+  
+  describe("unlock", function () {
+    it("Should successfully unlock Metis tokens and terminate the sequencer", async function () {
+      // Arrange: Lock tokens first
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
 
-      expect(await ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount
-      );
+      // Act
+      await expect(dealer.connect(owner).unlock())
+        .to.emit(dealer, "SequencerTerminated")
+        .withArgs(sequencerSignerAddress);
+
+      // Assert
+      expect(await dealer.active()).to.equal(false);
     });
 
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
+    it("Should fail to unlock if not the owner", async function () {
+      await expect(dealer.connect(user).unlock()).to.be.revertedWith(
+        "Ownable: caller is not the owner"
       );
     });
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  describe("unlock", function () {
+    it("Should successfully unlock Metis tokens and terminate the sequencer", async function () {
+      // Arrange: Lock tokens first
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+      // Act
+      await expect(dealer.connect(owner).unlock())
+        .to.emit(dealer, "SequencerTerminated")
+        .withArgs(sequencerSignerAddress);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
-
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
-
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
+      // Assert
+      expect(await dealer.active()).to.equal(false);
     });
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
-
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
+    it("Should fail to unlock if not the owner", async function () {
+      await expect(dealer.connect(user).unlock()).to.be.revertedWith(
+        "Ownable: caller is not the owner"
+      );
     });
   });
+
+  describe("unlockClaim", function () {
+    it("Should successfully claim unlocked Metis tokens", async function () {
+      // Arrange: Unlock first
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
+      await dealer.connect(owner).unlock();
+
+      // Act
+      await expect(dealer.connect(owner).unlockClaim()).to.not.be.reverted;
+    });
+
+    it("Should fail to claim if not the owner", async function () {
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
+      await dealer.connect(owner).unlock();
+
+      await expect(dealer.connect(user).unlockClaim()).to.be.revertedWith(
+        "Ownable: caller is not the owner"
+      );
+    });
+  });
+
+  describe("relock", function () {
+    it("Should fail to relock if there are no active sequencers", async function () {
+      await expect(dealer.connect(owner).active()).to.be.revertedWith(
+        "Dealer: no active sequencer"
+      );
+    });
+
+    it("Should successfully relock Metis tokens for active sequencers", async function () {
+      // Arrange: Lock tokens first
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
+
+      // Act
+      await expect(dealer.connect(owner).relock())
+        .to.emit(dealer, "IsSequencerRelocked")
+        .withArgs(true); 
+    });
+  });
+
+
+  describe("withdrawStakingAmount", function () {
+    it("Should successfully withdraw staking amount and deposit to redemptionQueue", async function () {
+      // Arrange: Lock tokens first
+      await dealer
+        .connect(owner)
+        .lockFor(sequencerSignerAddress, amountToLock, signerPubKey);
+
+      const withdrawAmount = ethers.parseEther("5000"); // Example amount
+
+      // Act
+      await expect(dealer.connect(owner).withdrawStakingAmount(withdrawAmount))
+        .to.emit(dealer, "StakingAmountWithdrawn")
+        .withArgs(redemptionQueue, withdrawAmount);
+    });
+
+    it("Should fail to withdraw staking amount if not the owner", async function () {
+      await expect(
+        dealer.connect(user).withdrawStakingAmount(ethers.parseEther("1000"))
+      ).to.be.revertedWith("Ownable: caller is not the owner");
+    });
+  });
+
 });

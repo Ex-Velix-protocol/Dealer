@@ -1,11 +1,12 @@
-require("@nomiclabs/hardhat-waffle");
+// require("@nomiclabs/hardhat-waffle");
+require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomiclabs/hardhat-etherscan");
 require("hardhat-deploy");
 require("solidity-coverage");
 require("hardhat-gas-reporter");
 require("hardhat-contract-sizer");
 require("dotenv").config();
-
+const { expect, assert } = require("chai");
 const SEPOLIA_RPC_URL =
   process.env.SEPOLIA__RCP_URL ||
   "https://eth-sepolia.g.alchemy.com/v2/YOUR-API-KEY";
@@ -73,7 +74,7 @@ module.exports = {
   sourcify: {
     enabled: true,
   },
-  allowUnlimitedContractSize: true,
+  allowUnlimitedContractSize: false,
   mocha: {
     timeout: 500000, // 500 seconds max for running tests
   },
