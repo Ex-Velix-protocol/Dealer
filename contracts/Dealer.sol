@@ -209,10 +209,6 @@ contract Dealer is OwnableUpgradeable {
             
              // If there is not any lock amount or reward, the process should be skipped.
             uint256 toBeProcessed = lockAmount + reward;
-            if (toBeProcessed == 0) {
-                continue;
-            }
-
             totalProcessed += toBeProcessed;
 
             // The rewards are withdrawn  if the locked amount plus the amount to be processed exceeds the maximum lock amount.
@@ -283,5 +279,8 @@ contract Dealer is OwnableUpgradeable {
     function setL2RewardDispatcher(address _l2RewardDispatcher) public onlyOwner {
         l2RewardDispatcher = _l2RewardDispatcher;
     }
-    
+
+    function setActive(bool _active) public onlyOwner {
+        active = _active;
+    }
 }
