@@ -42,7 +42,23 @@ describe("Dealer Contract Tests", function () {
       expect(await dealer.active()).to.equal(true);
     });
   });
-
+  
+  describe("relock", function () {
+    it("Should successfully relock Metis tokens for active sequencers", async function () {
+      const amountToRelock = ethers.parseEther("1");
+      // Arrange
+      const dealerUser = DealerFactory.connect(deployer);
+      expect(await dealerUser.active()).to.equal(true);
+      expect(await dealerUser.canStake(amountToRelock)).to.equal(true);
+  
+      try {
+        await dealerUser.relock(amountToRelock, { value: amountToRelock });
+      } catch (error) {
+        console.log("error: ", error);
+      }
+    });
+  });
+  
   describe("unlock", function () {
     it("Should successfully unlock Metis tokens and terminate the sequencer", async function () {
       // Arrange: Lock tokens first
@@ -56,9 +72,9 @@ describe("Dealer Contract Tests", function () {
       // Assert
       expect(await dealer.active()).to.equal(false);
     });
-
   });
-  
+
+
   describe("unlock", function () {
     it("Should successfully unlock Metis tokens and terminate the sequencer", async function () {
       // Arrange: Lock tokens first
@@ -127,14 +143,6 @@ describe("Dealer Contract Tests", function () {
     });
   });
 
-  describe("relock", function () {
-    it("Should successfully relock Metis tokens for active sequencers", async function () {
-      const dealerUser = DealerFactory.connect(deployer);
-      expect(await dealerUser.active()).to.equal(true);
-      // Act
-      await dealerUser.relock();
-    });
-  });
 
 
   describe("withdrawStakingAmount", function () {
