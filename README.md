@@ -43,10 +43,10 @@ ethers.parseEther("20000"),
 ### `relock`
 
 **Purpose:**  
-Augments the locked Metis tokens and rewards for all active sequencers by transferring tokens to the sequencer agent contracts and invoking their relock functions.
+Augments the locked Metis tokens and and invoking their relock functions.
 
-**Returns:**
-- `totalProcessed` (`uint256`): Total amount of Metis tokens and rewards that have been relocked.
+
+
 
 **Usage Example:**
 ```solidity

@@ -99,13 +99,15 @@ contract Dealer is OwnableUpgradeable {
     event SequencerInitialBalanceLocked(address indexed sequencerSigner, uint256 amount,bool active);
 
     /// @notice Emits when the sequencer is terminated.
-    /// @param sequencerSigner The address of the sequencer signer.
-    event SequencerTerminated(address indexed sequencerSigner);
+    event SequencerTerminated(uint256 indexed sequencerId, bool active);
+
 
     /// @notice Emits when the rewards are withdrawn.
     /// @param sequencerId The ID of the sequencer.
     /// @param reward The amount of rewards that have been withdrawn.
     event RewardsWithdrawn(uint256 indexed sequencerId, uint256 reward);
+
+    event UnlockClaimed(uint256 indexed sequencerId, bool active);
 
 
     /// @notice Initializes the contract.
@@ -192,12 +194,13 @@ contract Dealer is OwnableUpgradeable {
     function unlock() external payable onlyOwner {
         lockingPool.unlock{value: msg.value}(sequencerId, l2Gas);
         active = false;
-        emit SequencerTerminated(sequencerSigner);
+        emit SequencerTerminated(sequencerId, false);
     }
 
     /// @notice The `unlockClaim` function allows a sequencer to claim their Metis tokens after the unlocking waiting period has elapsed.
     function unlockClaim() external payable onlyOwner {
         lockingPool.unlockClaim{value: msg.value}(sequencerId, l2Gas);
+        emit UnlockClaimed(sequencerId, false);
     }
     
     /// @notice partial withdrawl of locked Metis tokens and deposits them into the redemptionQueue.
