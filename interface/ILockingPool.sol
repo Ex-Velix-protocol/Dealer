@@ -21,7 +21,7 @@ interface ILockingPool is ISequencerInfo {
     function lockFor(address _signer, uint256 _amount, bytes calldata _signerPubkey) external;
     function lockWithRewardRecipient(address _signer, address _rewardRecipient, uint256 _amount, bytes calldata _signerPubkey) external;
     function relock(uint256 _seqId, uint256 _amount, bool _lockReward) external;
-    function withdrawRewards(uint256 _seqId, uint32 _l2Gas) external;
+    function withdrawRewards(uint256 _seqId, uint32 _l2Gas) external payable;
     function unlock( uint256 _seqId, uint32 _l2Gas) external payable;
     function unlockClaim(uint256 _seqId, uint32 _l2Gas) external payable;
     function escrow() external view returns (ILockingInfo);

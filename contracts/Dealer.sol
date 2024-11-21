@@ -20,11 +20,8 @@ contract Dealer is OwnableUpgradeable {
     /// @param agent address of the agent
     event SequencerAgentAdded(uint32 index, address agent);
 
-    /// @notice Emits when additional Metis tokens and rewards are locked for a sequencer.
-    /// @param index The index of the sequencer agent in the sequencer list.
-    /// @param amount The amount of Metis tokens that have been added to the lock.
-    /// @param reward The amount of additional rewards that have been locked.
-    event SequencerRelocked(uint32 index, uint256 amount, uint256 reward);
+    /// @notice Emits when additional Metis tokens are locked for a sequencer.
+    event SequencerRelocked(uint256 sequencerId, uint256 amount );
 
     /// @notice Emits when Metis tokens are minted on Layer 2.
     /// @param amount The amount of Metis tokens that have been minted.
@@ -93,7 +90,7 @@ contract Dealer is OwnableUpgradeable {
     /// @notice Withdaws Metis token and deposits Metis tokens into the redemption queue.
     /// @param recipient The recipient of the  Metis token on  L2 (redemptionQueue).
     /// @param amount The amount of Metis tokens that have been deposited.
-    event StakingAmountWithdrawn(address indexed recipient, uint256 amount);
+    event StakingAmountWithdrawnToRedemptionQueue(address indexed recipient, uint256 amount);
 
     /// @notice Emits when the sequencer initial balance is locked.
     /// @param sequencerSigner The address of the sequencer signer.
@@ -110,9 +107,6 @@ contract Dealer is OwnableUpgradeable {
     /// @param reward The amount of rewards that have been withdrawn.
     event RewardsWithdrawn(uint256 indexed sequencerId, uint256 reward);
 
-    /// @notice Emits when the sequencer is relocked.
-    /// @param isRelocked The status of the sequencer.
-    event IsSequencerRelocked(bool isRelocked);
 
     /// @notice Initializes the contract.
     function initialize( 
@@ -167,6 +161,32 @@ contract Dealer is OwnableUpgradeable {
         emit SequencerInitialBalanceLocked(sequencerSigner, _amount, active);
     }
 
+    /// @notice Facilitates the process of augmenting the locked Metis tokens and rewards for the currently active sequencer.
+    /// @dev The `relock` function will transfer Metis tokens from the Dealer contract to the sequencer agent contract, and then call the `relock` function on the sequencer agent contract.  
+    function relock() external payable {
+        require(active, "Dealer: no active sequencer");
+        uint256 dealerBalance = metis.balanceOf(address(this));
+
+        require(canStake(dealerBalance), "Dealer: exceed max lock");
+        require (dealerBalance > 0, "Dealer: insufficient balance");
+        // Approve the LockingInfo contract to spend the specified amount of tokens
+        require(
+            metis.approve(address(lockingInfo), type(uint256).max),
+            "Dealer: Approval to LockingInfo failed"
+        );
+
+        lockingPool.relock(sequencerId, dealerBalance, false);
+        emit SequencerRelocked(sequencerId, dealerBalance);
+    }
+
+    /// @dev Withraws rewards if available
+   function claimRewards() external payable onlyOwner {
+        uint256 _rewards = _getRewards();
+        require (_rewards > 0,"Dealer:  Insufficient rewards");
+
+        lockingPool.withdrawRewards{value: msg.value}(sequencerId, l2Gas);
+        emit RewardsWithdrawn(sequencerId, _rewards);
+    }
 
     /// @notice Unlock Metis tokens and terminate the sequencer.
     function unlock() external payable onlyOwner {
@@ -179,59 +199,52 @@ contract Dealer is OwnableUpgradeable {
     function unlockClaim() external payable onlyOwner {
         lockingPool.unlockClaim{value: msg.value}(sequencerId, l2Gas);
     }
+    
+    /// @notice partial withdrawl of locked Metis tokens and deposits them into the redemptionQueue.
+    /// @param amount The amount of Metis tokens to withdraw.
+    function withdrawStakingAmount(uint256 amount) public payable onlyOwner {
+        require(amount > 0, "Dealer: invalid amount");
+        require(_getLocked() >= lockingInfo.minLock() + amount, "Dealer: exceed min lock");
+
+        lockingPool.withdraw(sequencerId, amount);
+        
+        address bridge = ILockingInfo(lockingInfo).bridge();
+        IERC20(ILockingInfo(lockingInfo).l1Token()).approve(bridge, amount);
+        IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, ILockingInfo(lockingInfo).l1Token(), ILockingInfo(lockingInfo).l2Token(), redemptionQueue, amount, l2Gas, "");
+        emit StakingAmountWithdrawnToRedemptionQueue(redemptionQueue,amount);
+    }
 
     function sequencerData() public view returns (ILockingPool.SequencerData memory) {
         return lockingPool.sequencers(sequencerId);
     }
 
-    /// @notice Facilitates the process of augmenting the locked Metis tokens and rewards for all currently active sequencers.
-    /// @dev The `relock` function will transfer Metis tokens from the Dealer contract to the sequencer agent contract, and then call the `relock` function on the sequencer agent contract.
-    /// @return totalProcessed The total amount of Metis tokens and rewards that have been relocked.
-    function relock() external payable returns (uint256 totalProcessed) {
-        require(active, "Dealer: no active sequencer");
-
-        uint maxLock = ILockingInfo(lockingInfo).maxLock();
-        uint256 undistributedAmount = metis.balanceOf(address(this));
-        uint256 totalRewards = 0;
-        for (uint32 i = 0; i < 1; i++) {
-            ILockingPool.SequencerData memory seq = sequencerData();
-            (uint256 reward, uint256 locked) = (seq.reward, seq.amount);
-            totalRewards += reward;
-
-            // The lock quota means the amount of Metis tokens that can be locked for the sequencer, due to the maximum lock amount.
-            uint256 lockQuota = locked < maxLock ? maxLock - locked : 0;
-
-            // The amount of Metis tokens that can be locked is the minimum of the lock quota and the undistributed amount.
-            uint256 lockAmount = Math.min(lockQuota, undistributedAmount);
-
-            // The undistributed amount should be reduced by the amount of Metis tokens that have been locked.
-            undistributedAmount -= lockAmount;
-            
-             // If there is not any lock amount or reward, the process should be skipped.
-            uint256 toBeProcessed = lockAmount + reward;
-            totalProcessed += toBeProcessed;
-
-            // The rewards are withdrawn  if the locked amount plus the amount to be processed exceeds the maximum lock amount.
-            bool _withdrawRewards = locked + toBeProcessed > maxLock;
-            if (_withdrawRewards && reward > 0) {
-                lockingPool.withdrawRewards(sequencerId, l2Gas);
-                emit RewardsWithdrawn(sequencerId, reward);
-            }
-
-            // If the lock amount is not zero, or if we decided to convert the rewards to lock amount, the `relock` function is called.
-            if (!_withdrawRewards || lockAmount > 0) {
-                lockingPool.relock(sequencerId, lockAmount, true);
-                emit SequencerRelocked(0, lockAmount, reward);
-            }
-        }   
-
-        // In the event of any rewards, the MetisMinter contract on Layer 2 is invoked to mint eMetis tokens. These tokens are then distributed as rewards to seMetis holders.
-        if (totalRewards > 0) {
-            _mintL2EMetis(totalRewards);
-            sumRewards += totalRewards;
+    function canStake(uint256 _amount) public view returns (bool) {
+        if (sequencerId == 0) {
+            return false;
         }
+        return _amount + _getLocked() <= lockingInfo.maxLock();
+    }
 
-        emit IsSequencerRelocked(true);
+    function stakingAmount() public view returns (uint256) {
+        if (sequencerId == 0) {
+            return 0;
+        }
+        return _getLocked();
+    }
+
+    function getRewards() external view returns (uint256) {
+        return _getRewards();
+    }
+
+    function _getLocked() internal view returns (uint256 _locked) {
+        ILockingPool.SequencerData memory seq = sequencerData();
+        _locked =  seq.amount;
+    }
+
+    function _getRewards() internal view returns (uint256 _rewards) {
+        ILockingPool.SequencerData memory seq = sequencerData();
+        _rewards = seq.reward;
+
     }
 
     /// @notice Sets the L2 gas limit.
@@ -248,24 +261,7 @@ contract Dealer is OwnableUpgradeable {
         return sequencerData().amount;
     }
 
-    /// @notice mint veMetis on Layer 2
-    /// @param amount Metis amount
-    function _mintL2EMetis(uint256 amount) internal {
-        bytes memory message = abi.encodeWithSelector(IVeMetisMinter.mintFromL1.selector, amount);
-        messenger.sendMessageViaChainId{value:msg.value}(l2ChainId, l2Minter, message, l2Gas);
-        emit L2MetisMinted(amount);
-    }
 
-    /// @notice withdraw locked Metis tokens and deposits them into the redemptionQueue.
-    /// @param amount The amount of Metis tokens to withdraw.
-    function withdrawStakingAmount(uint256 amount) public payable onlyOwner {
-        lockingPool.withdraw(sequencerId, amount);
-
-        address bridge = ILockingInfo(lockingInfo).bridge();
-        IERC20(ILockingInfo(lockingInfo).l1Token()).approve(bridge, amount);
-        IL1ERC20Bridge(bridge).depositERC20ToByChainId{value: msg.value}(l2ChainId, ILockingInfo(lockingInfo).l1Token(), ILockingInfo(lockingInfo).l2Token(), redemptionQueue, amount, l2Gas, "");
-        emit StakingAmountWithdrawn(redemptionQueue,amount);
-    }
 
     // Setters
     function setL2Minter(address _l2MinterAddress) public onlyOwner{
