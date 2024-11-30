@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "../interface/ICrossDomainEnabled.sol";
 import "../interface/ILockingPool.sol";
-import "../interface/IVeMetisMinter.sol";
 import "../interface/ICrossDomainMessenger.sol";
 import "../interface/IL1ERC20Bridge.sol";
 
@@ -164,7 +163,7 @@ contract Dealer is OwnableUpgradeable {
     }
 
     /// @notice Facilitates the process of augmenting the locked Metis tokens and rewards for the currently active sequencer.
-    /// @dev The `relock` function will transfer Metis tokens from the Dealer contract to the sequencer agent contract, and then call the `relock` function on the sequencer agent contract.  
+    /// @dev The `relock` function will call the `relock` function on the lockingPool contract.  
     function relock() external payable {
         require(active, "Dealer: no active sequencer");
         uint256 dealerBalance = metis.balanceOf(address(this));
